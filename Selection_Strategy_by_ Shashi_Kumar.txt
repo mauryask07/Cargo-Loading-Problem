@@ -1,0 +1,134 @@
+import pandas as pd
+import numpy as np
+from datetime import date
+from datetime import datetime
+import sys
+import warnings
+
+############################# ignor the warnings (if any) #################
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
+
+############################# Read the csv file ##################
+
+# Put the csv file's location between the inclosed comma #
+df = pd.read_csv(r"C:\Users\Maurya\Desktop\Assignment.csv")
+
+# Change the date into a specific datetime format
+df['Start_Date']= pd.to_datetime(df['Start_Date'], dayfirst = True) 
+df['End_Date']= pd.to_datetime(df['End_Date'],  dayfirst = True)
+
+############################# Create Function #####################
+def Select_Best_Truck(Date, Distance):
+
+    # Choose which truck are availabel during assigned date
+    df_limit = df[(df["Start_Date"] < Date) &  (df["End_Date"] > Date)]
+    
+    # If there is no truck are availabel in the given assigned date
+    if df_limit.empty==1:
+        print("Sorry!, Curreltly there is no truck available.")
+    else:
+        # Number of distance left to travel
+        df_limit["Left_Dist"] = df_limit["Minimum"]- df_limit["Travelled"]
+
+        # Change the assign date into dd-mm-yy datetime format
+        Assign_Date = datetime.strptime(Date, '%m-%d-%Y').date()
+
+        # Add the assigned data into the dataframe
+        df_limit.insert(len(df_limit.columns),"Assign_Date", Assign_Date)
+        df_limit['Assign_Date']= pd.to_datetime(df_limit['Assign_Date'], dayfirst = True)
+
+
+        # Count the number of days left from the assigned date to the end of the period of load carrier
+        df_limit["Left_Days"]=df_limit["End_Date"]-df_limit["Assign_Date"]
+        df_limit["Left_Days"] = df_limit["Left_Days"].dt.days
+
+        # Count the difference of days from starting of the period to the assigned date during period
+        df_limit["Passed_Days"]=df_limit["Assign_Date"]-df_limit["Start_Date"]
+        df_limit["Passed_Days"]=df_limit["Passed_Days"].dt.days
+
+        # Count the averaeg efficiency of the load carrier
+        # "avg_eff" less than 1 indicate that, the particular truck is travlled less than its average travel till the new assigned date
+        # "avg_eff" greater than 1 indicate that, the particular truck is travlled more than its average travel till the new assigned date
+        # "avg_eff" closer to 1 indicate better efficiency in terms of truck travelling
+        df_limit["Avg_Eff"] =df_limit["Travelled"]/((df_limit["Minimum"]/30)*df_limit["Passed_Days"])
+
+        # count the number of expected distance that should be travelled till the new assigned date
+        df_limit["Exp_Dist"] =((df_limit["Minimum"]/30)*df_limit["Passed_Days"])
+
+        # Short the trucks based on their load status (Vacant, Traveling, or Unloading)
+        # First preference to the "Vacant" trucks, and second preferance to the "Unloading" trucks. 
+        # Last preferance to the "Travelling" trucks. 
+        # "Vacant" status indicate that waiting for next assignment
+        # "Traveling" status indicate that truck is its in middle of the road and taking assignment
+        # "Unloading" status indicate that, the truck has already reached at destination and doing unloading. 
+        for i in df_limit["Status"]:
+                if i== "Vacant":
+                    df2 = df_limit[df_limit["Status"] == "Vacant"]
+                    break
+                elif i== "Traveling":
+                    df2 = df_limit[df_limit["Status"] == "Traveling"]
+                    break
+                else:
+                    df2 = df_limit[df_limit["Status"] == "Unloading"]
+        # Calculate the cost after including the new assignment's distance
+        # If the total distance (including new assigned distance) is below than it's  minimum gurantee run, there will be no extra charge.
+        # If the total distance (including new assigned distance) is greater than it's minimum gurantee run, there will be 20% extra charge (on extra KM).
+        for i in df2["Left_Dist"]:
+            if (Distance-i)<= 0:
+                df2["Cost"] = df2["Rate"]*df2["Minimum"]
+            else:
+                df2["Cost"] = df2["Rate"]*df2["Minimum"]+(Distance-df2["Left_Dist"])*df2["Rate"]*1.2
+        # Calculate the gurantee minimum cost
+        df2["Min_Cost"] =df2["Minimum"]*df2["Rate"]
+
+        # Calculate the difference between cost after new assignment and minimum cost 
+        df2["Cost_Diff"]=df2["Cost"]-df2["Min_Cost"]
+
+        ##################################### Selection Strategy ################################
+
+        # In order to utilize each Load Carrier to its minimum KM run, its cycle and maximizes the profit,- 
+        # Apply the some basic and importent condition to choose the truck for the new assignment.   
+        f=list(df2.index)
+        for i in f:
+            if (min(df2["Cost_Diff"]==0))==1:
+                best_str_df=df2[df2["Left_Days"]==min(df2["Left_Days"])]
+                # if number of Left_Days is same then select the Truck with minimum average efficiency
+                best_str_df=df2[df2.Avg_Eff == df2.Avg_Eff.min()]
+            elif (min(df2["Cost_Diff"]>0))==1:
+                best_str_df=df2[df2["Cost_Diff"]==min(df2["Cost_Diff"])]
+                # if the ost_Diff if same then select the Truck with minimum average efficiency
+                best_str_df=df2[df2.Avg_Eff == df2.Avg_Eff.min()]
+            elif (df2["Avg_Eff"][i] >1.2) &  (df2["Left_Days"][i]> 5) & (df2["Travelled"][i] + Distance) > df2["Minimum"][i]:
+                best_str_df = df2.drop(i ) 
+            elif ((df2["Travelled"][i] + Distance) >= df2["Minimum"][i]) &  (df2["Avg_Eff"][i]>1.2):
+                best_str_df = df2.drop(i )
+            elif ((df2["Travelled"][i] + Distance) <= df2["Minimum"][i]) &  (df2["Avg_Eff"][i] >1.2):
+                best_str_df= df4.drop(i )
+            elif ((df2["Travelled"][i] + Distance) >= df2["Minimum"][i]) &  (df2["Avg_Eff"][i] <1.2):
+                best_str_df = df2.drop(i )
+
+        # Select the row with minimum cost 
+        best_str=best_str_df[best_str_df.Cost == best_str_df.Cost.min()]
+
+        ############## Select the truck based on optimum strategy #############
+
+        # Create an empty list 
+        Row_list =[] 
+        # Iterate over each row 
+        for i in range((best_str.shape[0])): 
+            # Using iloc to access the values of  
+            # The current row denoted by "i"   
+            Row_list.append(list(best_str.iloc[i, :])[0])
+            for x in range(len(Row_list)): 
+                Row_list[x]
+                print ("You have assigned Truck Number:" ," ",Row_list[x])
+
+################### User Input #############
+
+# Put the date into "mm-dd-yy" format.
+Date='03-28-2020'
+Distance=1145
+
+################### Call the function #############
+Select_Best_Truck(Date, Distance)
